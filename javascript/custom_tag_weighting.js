@@ -14,6 +14,9 @@ const CTW_PROMPT_TEXTAREA_IDS = [
 ];
 
 let ctwActiveTextarea = null; // Store the textarea being modified
+let ctwReqTextboxEl = null;
+let ctwResTextboxEl = null;
+let ctwActionButtonEl = null;
 
 function ctwGetTagWeightRequestPayload(textarea, direction) {
     return JSON.stringify({
@@ -46,46 +49,66 @@ function ctwHandleCtrlWeight(event) {
     ctwActiveTextarea = textarea;
     const direction = event.key === 'ArrowUp' ? 'up' : 'down';
     const payload = ctwGetTagWeightRequestPayload(textarea, direction);
-    console.log("CTW: Payload prepared:", payload);
+    // console.log("CTW: Payload prepared:", payload); // Reduced verbosity
 
-    // Corrected elem_ids to match those defined in custom_tag_weighting.py
-    const reqTextbox = gradioApp().querySelector("#ctw-tag_weight_req_textbox textarea");
-    const actionButton = gradioApp().querySelector("#ctw-apply_tag_weight_action_button");
-
-    if (!reqTextbox) {
-        console.error("CTW: Request Textbox (#ctw-tag_weight_req_textbox textarea) not found.");
-        ctwActiveTextarea = null;
-        return;
+    // Use cached elements if available
+    if (!ctwReqTextboxEl || !ctwActionButtonEl) {
+        console.error("CTW: Request/Action Gradio elements not cached. Attempting to find them now.");
+        // Attempt to find them now, this serves as a fallback if onUiUpdate hasn't run/found them yet.
+        ctwReqTextboxEl = gradioApp().querySelector("#ctw-tag_weight_req_textbox textarea");
+        ctwActionButtonEl = gradioApp().querySelector("#ctw-apply_tag_weight_action_button");
+        if (!ctwReqTextboxEl || !ctwActionButtonEl) {
+            console.error("CTW: Critical - Request/Action Gradio elements not found even on immediate attempt.");
+            ctwActiveTextarea = null;
+            return;
+        }
     }
-    if (!actionButton) {
-        console.error("CTW: Action Button (#ctw-apply_tag_weight_action_button) not found.");
-        ctwActiveTextarea = null;
-        return;
-    }
-    console.log("CTW: Gradio request textbox and action button found.");
 
-    reqTextbox.value = payload;
+    // console.log("CTW: Gradio request textbox and action button available."); // Reduced verbosity
+
+    ctwReqTextboxEl.value = payload;
     const inputEvent = new Event('input', { bubbles: true }); // Must be dispatched on the textarea itself
-    reqTextbox.dispatchEvent(inputEvent);
-    console.log("CTW: Set request textbox value, dispatched input event.");
+    ctwReqTextboxEl.dispatchEvent(inputEvent);
+    // console.log("CTW: Set request textbox value, dispatched input event."); // Reduced verbosity
 
-    actionButton.click();
-    console.log("CTW: Clicked action button. Waiting for response...");
+    ctwActionButtonEl.click();
+    // console.log("CTW: Clicked action button. Waiting for response..."); // Reduced verbosity
 }
 
-function ctwSetupTagWeightResponseHandler() {
-    const resTextbox = gradioApp().querySelector("#ctw-tag_weight_res_textbox textarea");
 
-    if (!resTextbox) {
-        console.warn("CTW: Response Textbox (#ctw-tag_weight_res_textbox textarea) not found yet. Will retry on next UI update.");
-        return false;
+function ctwInitializeGradioElements() {
+    if (!ctwReqTextboxEl) {
+        ctwReqTextboxEl = gradioApp().querySelector("#ctw-tag_weight_req_textbox textarea");
+        if (ctwReqTextboxEl) console.log("CTW: Cached Request Textbox element.");
+        else console.warn("CTW: Request Textbox element not found for caching.");
+    }
+    if (!ctwActionButtonEl) {
+        ctwActionButtonEl = gradioApp().querySelector("#ctw-apply_tag_weight_action_button");
+        if (ctwActionButtonEl) console.log("CTW: Cached Action Button element.");
+        else console.warn("CTW: Action Button element not found for caching.");
+    }
+    if (!ctwResTextboxEl) {
+        ctwResTextboxEl = gradioApp().querySelector("#ctw-tag_weight_res_textbox textarea");
+        if (ctwResTextboxEl) console.log("CTW: Cached Response Textbox element.");
+        else console.warn("CTW: Response Textbox element not found for caching.");
     }
 
-    if (resTextbox.dataset.ctwObserverAttached === 'true') {
+    // Return true if all essential elements for response handling are cached
+    return ctwResTextboxEl !== null;
+}
+
+
+function ctwSetupTagWeightResponseHandler() {
+    if (!ctwResTextboxEl) { // Check if cached element is available
+        console.warn("CTW: Response Textbox (#ctw-tag_weight_res_textbox textarea) not cached yet. `ctwInitializeGradioElements` should handle this.");
+        return false; // Initialization should occur via onUiUpdate -> ctwInitializeGradioElements
+    }
+
+    if (ctwResTextboxEl.dataset.ctwObserverAttached === 'true') {
         return true;
     }
 
-    console.log("CTW: Found response textbox. Setting up MutationObserver:", resTextbox);
+    console.log("CTW: Found cached response textbox. Setting up MutationObserver:", ctwResTextboxEl);
 
     const observer = new MutationObserver((mutationsList, observerInstance) => {
         if (!ctwActiveTextarea) {
@@ -95,16 +118,16 @@ function ctwSetupTagWeightResponseHandler() {
 
         for(const mutation of mutationsList) {
             if (mutation.type === 'childList' || mutation.type === 'characterData' || mutation.type === 'attributes') {
-                const responseJson = resTextbox.value;
-                console.log("CTW: Response textbox value:", responseJson);
+                const responseJson = ctwResTextboxEl.value; // Use cached element
+                // console.log("CTW: Response textbox value:", responseJson); // Reduced verbosity
 
                 if (responseJson && responseJson.trim() !== "") {
                     try {
                         const response = JSON.parse(responseJson);
-                        console.log("CTW: Parsed response:", response);
+                        // console.log("CTW: Parsed response:", response); // Reduced verbosity
 
                         if (response.success && response.new_prompt_text !== undefined) {
-                            console.log("CTW: Success. Updating textarea with new prompt:", response.new_prompt_text);
+                            // console.log("CTW: Success. Updating textarea with new prompt:", response.new_prompt_text); // Reduced verbosity
                             const oldScrollTop = ctwActiveTextarea.scrollTop;
                             const oldSelectionStart = ctwActiveTextarea.selectionStart;
                             const oldText = ctwActiveTextarea.value;
@@ -117,15 +140,15 @@ function ctwSetupTagWeightResponseHandler() {
                             ctwActiveTextarea.selectionStart = newCursorPos;
                             ctwActiveTextarea.selectionEnd = newCursorPos;
                             ctwActiveTextarea.scrollTop = oldScrollTop;
-                            console.log("CTW: Textarea updated. New cursor pos:", newCursorPos);
+                            // console.log("CTW: Textarea updated. New cursor pos:", newCursorPos); // Reduced verbosity
 
                             if (window.updateInput) {
                                 window.updateInput(ctwActiveTextarea);
-                                console.log("CTW: Called window.updateInput().");
+                                // console.log("CTW: Called window.updateInput()."); // Reduced verbosity
                             } else {
                                 const inputEvent = new Event('input', { bubbles: true });
                                 ctwActiveTextarea.dispatchEvent(inputEvent);
-                                console.log("CTW: Dispatched input event as fallback.");
+                                // console.log("CTW: Dispatched input event as fallback."); // Reduced verbosity
                             }
 
                         } else if (response.error) {
@@ -137,22 +160,19 @@ function ctwSetupTagWeightResponseHandler() {
                         console.error("CTW: Failed to parse response JSON.", e, "JSON was:", responseJson);
                     }
 
-                    resTextbox.value = "";
+                    ctwResTextboxEl.value = ""; // Use cached element
                     const clearEvent = new Event('input', { bubbles: true });
-                    resTextbox.dispatchEvent(clearEvent);
-                    // console.log("CTW: Cleared response textbox."); // Reduced verbosity
-
+                    ctwResTextboxEl.dispatchEvent(clearEvent); // Use cached element
                     ctwActiveTextarea = null;
-                    // console.log("CTW: Reset active textarea."); // Reduced verbosity
                     break;
                 }
             }
         }
     });
 
-    observer.observe(resTextbox, { childList: true, characterData: true, subtree: true, attributes: true, attributeOldValue: true });
-    resTextbox.dataset.ctwObserverAttached = 'true';
-    console.log("CTW: Response handler (MutationObserver) successfully set up and observing for:", resTextbox);
+    observer.observe(ctwResTextboxEl, { childList: true, characterData: true, subtree: true, attributes: true, attributeOldValue: true }); // Use cached element
+    ctwResTextboxEl.dataset.ctwObserverAttached = 'true'; // Use cached element
+    console.log("CTW: Response handler (MutationObserver) successfully set up and observing for cached response textbox.");
     return true;
 }
 
@@ -168,31 +188,23 @@ function ctwAttachKeydownListeners() {
                 if (!textarea.dataset.ctwKeydownAttached) {
                     textarea.addEventListener('keydown', ctwHandleCtrlWeight);
                     textarea.dataset.ctwKeydownAttached = true;
-                    console.log(`CTW: Attached keydown listener to textarea in #${idFragment} (ID: ${textarea.id || 'N/A'}, Placeholder: "${textarea.placeholder || 'N/A'}")`);
+                    // console.log(`CTW: Attached keydown listener to textarea in #${idFragment}`); // Reduced verbosity
                     actuallyAttachedCount++;
                 }
-            } else {
-                 // console.warn(`CTW: Textarea not found within #${idFragment}`);
             }
-        } else {
-             // console.warn(`CTW: Container element #${idFragment} not found for main prompts.`);
         }
     });
-
-    if (actuallyAttachedCount > 0) {
-        // console.log(`CTW: Successfully attached/verified keydown listeners for ${actuallyAttachedCount} targeted textareas.`);
-    } else {
-        // console.warn("CTW: Could not find or attach to any of the primary prompt textareas using current selectors during this call. Will retry on UI update.");
-    }
 }
 
 // Standard A1111 UI update hook
 (
   window.onAfterUiUpdate || window.onUiUpdate || (() => {}) // Fallback to empty function if neither exists
 )(() => {
-  // console.log("CTW: onUiUpdate triggered.");
-  ctwAttachKeydownListeners();
-  if (!window.ctwTagWeightResponseHandlerAttached) {
+  ctwInitializeGradioElements(); // Initialize/cache Gradio elements
+  ctwAttachKeydownListeners(); // Attach keydown listeners
+
+  // Setup response handler only if all necessary elements are cached and handler not already attached
+  if (ctwResTextboxEl && !window.ctwTagWeightResponseHandlerAttached) {
     if (ctwSetupTagWeightResponseHandler()) {
         window.ctwTagWeightResponseHandlerAttached = true;
         console.log("CTW: Tag Weight Response Handler global flag set to true.");
