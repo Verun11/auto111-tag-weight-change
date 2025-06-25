@@ -329,3 +329,164 @@ if __name__ == '__main__':
 
 
     print("All apply_weight_to_tag tests passed.")
+
+
+def split_tags(prompt_text: str) -> list[str]:
+    """
+    Splits a prompt string into a list of tags.
+    Commas within parentheses are ignored as separators.
+    Leading/trailing whitespace for each tag is preserved initially,
+    as it might be relevant for joining later, though typical use might strip them.
+    """
+    tags = []
+    if not prompt_text:
+        return []
+
+    current_pos = 0
+    paren_level = 0
+    segment_start = 0
+    for i, char in enumerate(prompt_text):
+        if char == '(':
+            paren_level += 1
+        elif char == ')':
+            if paren_level > 0:
+                paren_level -= 1
+        elif char == ',' and paren_level == 0:
+            tags.append(prompt_text[segment_start:i])
+            segment_start = i + 1 # Start next tag after comma
+
+    # Add the last segment
+    tags.append(prompt_text[segment_start:])
+
+    # Filter out empty strings that might result from ",," or trailing/leading commas if desired,
+    # but for accurate reconstruction, preserve all segments initially.
+    # Example: "tag1,,tag3" -> ["tag1", "", "tag3"]
+    return tags
+
+def ignore_initial_tags(prompt_text: str, num_to_ignore: int) -> str:
+    """
+    Removes a specified number of initial tags from the prompt.
+    """
+    if num_to_ignore <= 0:
+        return prompt_text
+
+    all_tags = split_tags(prompt_text)
+
+    if num_to_ignore >= len(all_tags):
+        return "" # Ignored all tags
+
+    tags_to_keep = all_tags[num_to_ignore:]
+
+    # Reconstruct the prompt.
+    # If the first tag to keep originally had leading space (because it followed a comma),
+    # that space might now be at the beginning of the new prompt. Usually, we want to strip it.
+    # However, simple join with comma is standard.
+    # Consider if the original prompt had specific spacing around commas.
+    # split_tags preserves the raw segments, so "tag1 , tag2" -> ["tag1 ", " tag2"]
+    # Joining these with "," would give "tag1 , tag2".
+    # If we strip, "tag1,tag2". The example prompt has no spaces around commas.
+
+    # Let's strip each tag before joining, then join with ", " for a clean look,
+    # unless a tag is empty, in which case we might want to preserve that structure.
+    # Given the example: (tag1),(tag2) - no spaces.
+    # The split_tags function as written will give ["(tag1)", "(tag2)"]
+    # If we have "tag1, tag2", it gives ["tag1", " tag2"].
+    # If we keep " tag2" and it becomes the first, it would be " tag2".
+
+    # A robust way to rejoin is to just join them with comma.
+    # If the original prompt was "tag1, tag2, tag3" and we ignore 1,
+    # split_tags gives ["tag1", " tag2", " tag3"]
+    # tags_to_keep is [" tag2", " tag3"]
+    # Joining gives " tag2, tag3". We should strip the first element's leading space if it becomes the new first.
+
+    if not tags_to_keep:
+        return ""
+
+    # If the first tag to keep starts with a space (likely from being after a comma),
+    # and it's now the very first tag, strip its leading space.
+    # This handles cases like "tag1, tag2" -> "tag2" (not " tag2").
+    rejoined_prompt = ""
+    if tags_to_keep:
+        first_tag = tags_to_keep[0]
+        # Only strip if it's not an empty string itself (e.g. from `,,`)
+        if first_tag and first_tag[0].isspace() and prompt_text.find(first_tag) > 0 :
+             tags_to_keep[0] = first_tag.lstrip()
+
+        rejoined_prompt = ",".join(tags_to_keep)
+
+    return rejoined_prompt
+
+if __name__ == '__main__':
+    # (Existing tests for get_tag_at_cursor and apply_weight_to_tag)
+    # ...
+
+    print("\n--- split_tags tests ---")
+    def run_split_test(prompt, expected_tags):
+        print(f"Prompt: '{prompt}'")
+        tags = split_tags(prompt)
+        print(f"  -> Got: {tags}")
+        print(f"  -> Exp: {expected_tags}")
+        assert tags == expected_tags
+        print("  OK")
+
+    run_split_test("tag1,tag2,tag3", ["tag1", "tag2", "tag3"])
+    run_split_test("tag1,(tag,with,comma),tag3", ["tag1", "(tag,with,comma)", "tag3"])
+    run_split_test("tag1", ["tag1"])
+    run_split_test("", [])
+    run_split_test(",", ["", ""])
+    run_split_test("tag1,", ["tag1", ""])
+    run_split_test(",tag1", ["", "tag1"])
+    run_split_test("  tag1  ,  tag2  ", ["  tag1  ", "  tag2  "])
+    run_split_test("tag1,,tag3", ["tag1", "", "tag3"])
+
+    example_prompt_tags = "(dark-skinned male:-0.9), (monochrome,greyscale:-1.9),(narrow waist:-0.8), (simple background:-2.2), (year 2025:2.4),(year 2024:0.85),(year 2023:0.3), (flat color:-0.8), (best quality,absurdres:1.1), (simple illustration:-6.5), (chromatic aberration:0.4), (film grain:2),(sketch:1.1), (painterly:1.1), (bad anatomy:-1.5), (muscular male:-0.7), (full body:-0.7),(bloom:-1),(blue background,blue theme:-0.49), (three-quarter view:1.5),(colorful:1.1),morning sunlight,(cold colors:0.1),(sunset:-0.4),(orange theme:-2.1),(sepia:-3.1),(yellow theme:-0.4),(grey theme:-2.1),(huge female:1.1),(dramatic lighting:2),(soft colors:4.8),(pastel colors:1.1), (elegant bedroom:0.2), (location:5),(simple white bedroom:2),(teenage girl has a tall huge wide thick curvy body:3),(purple theme,purple background:-0.1),(invisible man:-0.5), groin, groin tendon, (lip gloss:1.5),(round breasts:3),mother and son, teenage girl and younger boy, (curvy:4.1),size difference,nsfw,(grabbing:0.5),no text, (pale nipples:0.5),(panties aside:0.5), steaming body, (heavy breathing:1.5),(fat mons,huge penis:0.45),(thick thighs:0.1),(living room:0.5), indoors,lips,(perky breasts:2.2),(large areolae:1),very sweaty,huge fat mons, artist: orgoglioso banane,"
+    # For this long prompt, splitting and checking length is sufficient for a basic test
+    split_example = split_tags(example_prompt_tags)
+    print(f"Example prompt split into {len(split_example)} tags.")
+    # The example prompt has a trailing comma, so the last element will be an empty string.
+    # User mentioned 68 tags. If trailing comma makes an empty tag, it's 69 segments.
+    # Let's count non-empty for user's definition:
+    print(f"Example prompt non-empty tags: {len([t for t in split_example if t.strip()])}")
+
+
+    print("\n--- ignore_initial_tags tests ---")
+    def run_ignore_test(prompt, num_ignore, expected_prompt):
+        print(f"Prompt: '{prompt}', Ignore: {num_ignore}")
+        result = ignore_initial_tags(prompt, num_ignore)
+        print(f"  -> Got: '{result}'")
+        print(f"  -> Exp: '{expected_prompt}'")
+        assert result == expected_prompt
+        print("  OK")
+
+    run_ignore_test("tag1,tag2,tag3", 1, "tag2,tag3")
+    run_ignore_test("tag1,tag2,tag3", 0, "tag1,tag2,tag3")
+    run_ignore_test("tag1,tag2,tag3", 3, "")
+    run_ignore_test("tag1,tag2,tag3", 4, "")
+    run_ignore_test("tag1,(tag,with,comma),tag3", 1, "(tag,with,comma),tag3")
+    run_ignore_test("tag1", 1, "")
+    run_ignore_test("", 1, "")
+    run_ignore_test("tag1, tag2, tag3", 1, "tag2, tag3") # Test space stripping for new first element
+    run_ignore_test("tag1,  tag2, tag3", 1, " tag2, tag3") # Test space stripping (multiple spaces)
+    run_ignore_test("tag1,,tag3", 1, ",tag3") # Ignores "tag1", keeps empty tag and "tag3"
+    run_ignore_test("tag1,,tag3", 2, "tag3") # Ignores "tag1" and "", keeps "tag3"
+
+    # Test with the example prompt structure (no spaces around commas)
+    example_short = "(tagA:1),tagB,(tagC,D:0.5),tagE"
+    run_ignore_test(example_short, 1, "tagB,(tagC,D:0.5),tagE")
+    run_ignore_test(example_short, 2, "(tagC,D:0.5),tagE")
+
+    # Test reconstruction of example prompt if some initial tags are ignored
+    # Expected: first tag "(dark-skinned male:-0.9)" removed
+    example_part_1 = "(dark-skinned male:-0.9)"
+    example_part_2_onwards = "(monochrome,greyscale:-1.9),(narrow waist:-0.8), (simple background:-2.2), (year 2025:2.4),(year 2024:0.85),(year 2023:0.3), (flat color:-0.8), (best quality,absurdres:1.1), (simple illustration:-6.5), (chromatic aberration:0.4), (film grain:2),(sketch:1.1), (painterly:1.1), (bad anatomy:-1.5), (muscular male:-0.7), (full body:-0.7),(bloom:-1),(blue background,blue theme:-0.49), (three-quarter view:1.5),(colorful:1.1),morning sunlight,(cold colors:0.1),(sunset:-0.4),(orange theme:-2.1),(sepia:-3.1),(yellow theme:-0.4),(grey theme:-2.1),(huge female:1.1),(dramatic lighting:2),(soft colors:4.8),(pastel colors:1.1), (elegant bedroom:0.2), (location:5),(simple white bedroom:2),(teenage girl has a tall huge wide thick curvy body:3),(purple theme,purple background:-0.1),(invisible man:-0.5), groin, groin tendon, (lip gloss:1.5),(round breasts:3),mother and son, teenage girl and younger boy, (curvy:4.1),size difference,nsfw,(grabbing:0.5),no text, (pale nipples:0.5),(panties aside:0.5), steaming body, (heavy breathing:1.5),(fat mons,huge penis:0.45),(thick thighs:0.1),(living room:0.5), indoors,lips,(perky breasts:2.2),(large areolae:1),very sweaty,huge fat mons, artist: orgoglioso banane,"
+    run_ignore_test(example_prompt_tags, 1, example_part_2_onwards)
+
+    # Test ignoring all actual content tags from example, leaving only the final empty string if present
+    # User said 68 tags. The prompt ends with a comma, so split_tags will produce 69 segments, the last being empty.
+    # If we ignore 68 tags, we are left with the last (empty) segment. Joining it results in "".
+    run_ignore_test(example_prompt_tags, 68, "") # This assumes the trailing "" is the 69th element.
+    # If we ignore 69 (all segments including the trailing empty one)
+    run_ignore_test(example_prompt_tags, 69, "")
+
+
+    print("All new tag utility tests passed.")
